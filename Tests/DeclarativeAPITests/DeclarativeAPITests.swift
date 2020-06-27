@@ -1,5 +1,5 @@
 import XCTest
-@testable import DeclarativeAPI
+import DeclarativeAPI
 
 protocol Model: Codable {
     associatedtype Identifier: Hashable
@@ -19,30 +19,20 @@ struct UserKey: PathKey {
 struct GetUser: Responder {
     @RouteParameter<UserKey> var userId
     
-    var route: some Route {
+    var route: GET<User> {
         GET<User>("users", $userId) { request in
-            print(request)
-            
-            return .ok(User(id: request.userId, name: "Hoi"))
+            return User(id: request.userId, name: "Hoi")
         }
     }
 }
 
 final class DeclarativeAPITests: XCTestCase {
     func testExample() throws {
-//        let route = GET<User>("users", UserId()) { request in
-//            let id = try request.parameter(UserId.self)
-//            
-//            return .ok(User(id: id, name: "Joannis"))
-//        }
-        
-        print(
-            try GetUser().respond(to: HTTPRequest(
-                method: "GET",
-                path: ["users", "1"],
-                body: []
-            ))
-        )
+        print(try GetUser().respond(to: HTTPRequest(
+            method: "GET",
+            path: ["users", "1"],
+            body: []
+        )))
     }
 
     static var allTests = [

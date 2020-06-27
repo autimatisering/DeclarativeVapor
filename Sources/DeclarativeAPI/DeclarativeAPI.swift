@@ -1,21 +1,21 @@
 import Foundation
 
-typealias HTTPBody = [UInt8]
+public typealias HTTPBody = [UInt8]
 
-protocol HTTPMethod {
+public protocol HTTPMethod {
     associatedtype InputBody
     
     static var methodName: String { get }
     static func makeBody(from body: HTTPBody) throws -> InputBody
 }
 
-enum HTTPMethods {
-    struct GET: HTTPMethod {
-        typealias InputBody = Void
+public enum HTTPMethods {
+    public struct GET: HTTPMethod {
+        public typealias InputBody = Void
         
-        static let methodName = "GET"
+        public static let methodName = "GET"
         
-        static func makeBody(from body: HTTPBody) throws -> Void {
+        public static func makeBody(from body: HTTPBody) throws -> Void {
             guard body.isEmpty else {
                 throw CustomRouterError.unexpectedBodyProvided
             }
@@ -24,10 +24,10 @@ enum HTTPMethods {
         }
     }
 
-    struct POST<InputBody: Decodable>: HTTPMethod {
-        static var methodName: String { "POST" }
+    public struct POST<InputBody: Decodable>: HTTPMethod {
+        public static var methodName: String { "POST" }
         
-        static func makeBody(from body: HTTPBody) throws -> InputBody {
+        public static func makeBody(from body: HTTPBody) throws -> InputBody {
             try JSONDecoder().decode(InputBody.self, from: Data(body))
         }
     }
@@ -40,7 +40,7 @@ protocol Middleware {
     static func transformInput(_ input: Input) -> Output
 }
 
-struct PathComponent: PathComponentRepresentable {
+public struct PathComponent: PathComponentRepresentable {
     fileprivate enum _Component {
         case exact(String)
         case value(ObjectIdentifier)
@@ -52,38 +52,41 @@ struct PathComponent: PathComponentRepresentable {
         self.wrapped = component
     }
     
-    var pathComponent: PathComponent { self }
+    public var pathComponent: PathComponent { self }
 }
 
-protocol PathComponentRepresentable {
+public protocol PathComponentRepresentable {
     var pathComponent: PathComponent { get }
 }
 
 extension String: PathComponentRepresentable {
-    var pathComponent: PathComponent {
+    public var pathComponent: PathComponent {
         PathComponent(component: .exact(self))
     }
 }
 
-protocol PathKey {
+public protocol PathKey {
     associatedtype Value: LosslessStringConvertible
 }
 
-protocol Route {
+public protocol SimpleRouteProtocol {
     associatedtype Method: HTTPMethod
     associatedtype OutputBody: Encodable
     
     var components: [PathComponent] { get }
-    func respond(to request: Request) throws -> Response
+    func respond(to request: Request<Method>) throws -> Response<OutputBody>
 }
 
-struct _Route<Method: HTTPMethod, OutputBody: Encodable>: DeclarativeAPI.Route {
-    typealias Handler = (Request) throws -> Response
+public struct Route<
+    Method: HTTPMethod,
+    OutputBody: Encodable
+>: DeclarativeAPI.SimpleRouteProtocol {
+    public typealias Handler = (Request<Method>) throws -> Response<OutputBody>
     
-    internal let components: [PathComponent]
+    public let components: [PathComponent]
     private let handler: Handler
     
-    init(
+    public init(
         _ components: PathComponentRepresentable...,
         handler: @escaping Handler
     ) {
@@ -91,7 +94,7 @@ struct _Route<Method: HTTPMethod, OutputBody: Encodable>: DeclarativeAPI.Route {
         self.handler = handler
     }
     
-    func respond(to request: Request) throws -> Response {
+    public func respond(to request: Request<Method>) throws -> Response<OutputBody> {
         try handler(request)
     }
 }
@@ -103,12 +106,12 @@ enum CustomRouterError: Error {
     case missingPathComponent(Any.Type)
 }
 
-struct _Request<R: Route> {
+public struct Request<Method: HTTPMethod> {
     let routerComponents: [PathComponent]
     let requestComponents: [String]
-    let body: R.Method.InputBody
+    public let body: Method.InputBody
     
-    func parameter<Key: PathKey>(_ type: Key.Type) throws -> Key.Value {
+    public func parameter<Key: PathKey>(_ type: Key.Type) throws -> Key.Value {
         let component = ""
         guard let value = Key.Value(component) else {
             throw CustomRouterError.pathComponentDecodeFailure(
@@ -121,34 +124,25 @@ struct _Request<R: Route> {
     }
 }
 
-struct _Response<R: Route> {
+public struct Response<OutputBody: Encodable> {
     let code: Int
-    let body: R.OutputBody
+    public let body: OutputBody
     
-    static func ok(_ body: R.OutputBody) -> Self {
+    public static func ok(_ body: OutputBody) -> Self {
         Self(code: 200, body: body)
     }
 }
 
-extension Route {
-    typealias Request = _Request<Self>
-    typealias Response = _Response<Self>
-}
-
-struct HTTPRequest {
-    let method: String
-    let path: [String]
-    let body: HTTPBody
-}
-
-protocol Responder: Encodable {
-    associatedtype Route: DeclarativeAPI.Route
+public struct HTTPRequest {
+    public let method: String
+    public let path: [String]
+    public let body: HTTPBody
     
-    var route: Route { get }
-}
-
-extension Responder {
-    typealias GET<Output: Encodable> = _Route<HTTPMethods.GET, Output>
+    public init(method: String, path: [String], body: HTTPBody) {
+        self.method = method
+        self.path = path
+        self.body = body
+    }
 }
 
 protocol RequestContainerBuilder: Encodable {
@@ -194,20 +188,20 @@ extension RequestContainerBuilder {
     public func encode(to encoder: Encoder) throws { }
 }
 
-@propertyWrapper struct RouteParameter<Key: PathKey>: RequestProperty, RequestContainerBuilder {
-    typealias PresentedValue = Key.Value
+@propertyWrapper public struct RouteParameter<Key: PathKey>: RequestProperty, RequestContainerBuilder {
+    public typealias PresentedValue = Key.Value
     
-    var wrappedValue: Self { self }
+    public var wrappedValue: Self { self }
     
-    var projectedValue: PathComponent {
+    public var projectedValue: PathComponent {
         .init(component: .value(ObjectIdentifier(Key.self)))
     }
     
-    init(_ key: Key.Type = Key.self) {}
+    public init(_ key: Key.Type = Key.self) {}
     
-    func presentValue(from container: RequestContainer) -> PresentedValue {
+    public func presentValue(from container: RequestContainer) -> PresentedValue {
         guard let value = container.getValue(forKey: Key.self) else {
-            fatalError("Route parameter is requested before the execution of a request")
+            fatalError("_Route parameter is requested before the execution of a request")
         }
         
         return value
@@ -239,9 +233,63 @@ extension RequestContainerBuilder {
     }
 }
 
-extension Responder {
-    func respond(to httpRequest: HTTPRequest) throws -> Route.Response {
-        let request = try Route.Request(
+public struct ResponderRoute<
+    Method: HTTPMethod,
+    BaseResponder: DeclarativeAPI.Responder,
+    OutputBody: Encodable
+>: RouteProtocol {
+    typealias Handler = (RouteRequest<BaseResponder>) throws -> Response<OutputBody>
+    
+    public let components: [PathComponent]
+    let handler: Handler
+    
+    private init(
+        _ components: PathComponentRepresentable...,
+        handler: @escaping Handler
+    ) {
+        self.components = components.map(\.pathComponent)
+        self.handler = handler
+    }
+    
+    public init(
+        _ components: PathComponentRepresentable...,
+        handler: @escaping (RouteRequest<BaseResponder>) throws -> OutputBody
+    ) {
+        self.components = components.map(\.pathComponent)
+        self.handler = { request in
+            return try .ok(handler(request))
+        }
+    }
+    
+    public func respond(to request: RouteRequest<BaseResponder>) throws -> Response<OutputBody> {
+        try handler(request)
+    }
+}
+
+public protocol RouteProtocol {
+    associatedtype Method: HTTPMethod
+    associatedtype BaseResponder: DeclarativeAPI.Responder
+    associatedtype OutputBody: Encodable
+    
+    var components: [PathComponent] { get }
+    func respond(to request: RouteRequest<BaseResponder>) throws -> Response<OutputBody>
+}
+
+public protocol Responder: Encodable {
+    associatedtype Route: DeclarativeAPI.RouteProtocol
+    
+    var route: Route { get }
+}
+
+public extension Responder {
+    typealias GET<Output: Encodable> = DeclarativeAPI.ResponderRoute<HTTPMethods.GET, Self, Output>
+}
+
+public extension Responder where Route.BaseResponder == Self {
+    func respond(
+        to httpRequest: HTTPRequest
+    ) throws -> Response<Route.OutputBody> {
+        let request = try Request<Route.Method>(
             routerComponents: route.components,
             requestComponents: httpRequest.path,
             body: Route.Method.makeBody(from: httpRequest.body)
@@ -258,7 +306,7 @@ extension Responder {
             try containerBuilder.setProperties(in: container)
         }
         
-        let routeRequest = RouteRequest(
+        let routeRequest = RouteRequest<Self>(
             responder: self,
             request: request,
             container: container
@@ -268,12 +316,12 @@ extension Responder {
     }
 }
 
-@dynamicMemberLookup struct RouteRequest<R: Responder> {
+@dynamicMemberLookup public struct RouteRequest<R: Responder> {
     let responder: R
-    let request: R.Route.Request
+    let request: Request<R.Route.Method>
     let container: RequestContainer
     
-    subscript<V: RequestProperty>(dynamicMember keyPath: KeyPath<R, V>) -> V.PresentedValue {
+    public subscript<V: RequestProperty>(dynamicMember keyPath: KeyPath<R, V>) -> V.PresentedValue {
         responder[keyPath: keyPath].presentValue(from: container)
     }
 }
