@@ -1,6 +1,7 @@
+import Vapor
 import Foundation
 
-public typealias HTTPBody = [UInt8]
+public typealias HTTPBody = Vapor.Request.Body
 
 public protocol HTTPMethod {
     associatedtype InputBody
@@ -15,20 +16,18 @@ public enum HTTPMethods {
         
         public static let methodName = "GET"
         
-        public static func makeBody(from body: HTTPBody) throws -> Void {
-            guard body.isEmpty else {
-                throw CustomRouterError.unexpectedBodyProvided
-            }
-            
-            return ()
-        }
+        public static func makeBody(from body: HTTPBody) throws -> Void {}
     }
 
     public struct POST<InputBody: Decodable>: HTTPMethod {
         public static var methodName: String { "POST" }
         
         public static func makeBody(from body: HTTPBody) throws -> InputBody {
-            try JSONDecoder().decode(InputBody.self, from: Data(body))
+            guard let buffer = body.data else {
+                throw CustomRouterError.missingBody
+            }
+            
+            return try JSONDecoder().decode(InputBody.self, from: buffer)
         }
     }
 }
@@ -65,10 +64,6 @@ extension String: PathComponentRepresentable {
     }
 }
 
-public protocol PathKey {
-    associatedtype Value: LosslessStringConvertible
-}
-
 public protocol SimpleRouteProtocol {
     associatedtype Method: HTTPMethod
     associatedtype OutputBody: Encodable
@@ -103,6 +98,7 @@ enum CustomRouterError: Error {
     case pathComponentDecodeFailure(input: String, output: Any.Type)
     case invalidHttpMethod(provided: String, needed: String)
     case unexpectedBodyProvided
+    case missingBody
     case missingPathComponent(Any.Type)
 }
 
@@ -161,16 +157,17 @@ public final class RequestContainer {
     var isActive = true
     fileprivate var storage = [ObjectIdentifier: Any]()
     
-    func setValue<Key: PathKey>(_ value: Key.Value, forKey type: Key.Type) {
+    func setValue<Key: RequestContainerKey>(_ value: Key.Value, forKey type: Key.Type) {
         assert(isActive)
         self.storage[ObjectIdentifier(type)] = value
     }
     
-    func getValue<Key: PathKey>(forKey type: Key.Type) -> Key.Value? {
+    func getValue<Key: RequestContainerKey>(forKey type: Key.Type) -> Key.Value? {
         storage[ObjectIdentifier(type)] as? Key.Value
     }
     
     init(
+        application: Application,
         routerComponents: [PathComponent],
         requestComponents: [String]
     ) {
@@ -188,6 +185,48 @@ extension RequestContainerBuilder {
     public func encode(to encoder: Encoder) throws { }
 }
 
+public protocol RequestContainerKey {
+    associatedtype Value
+}
+public protocol PathKey: RequestContainerKey where Value: LosslessStringConvertible {}
+
+//public protocol ApplicationKey: RequestContainerKey {
+//    func instantiate(on application: Application)
+//}
+
+public struct ApplicationValues {
+    public let app: Application
+    
+    fileprivate init(app: Application) {
+        self.app = app
+    }
+}
+
+fileprivate struct ApplicationValuesKey: RequestContainerKey {
+    typealias Value = ApplicationValues
+}
+
+@propertyWrapper public struct AppEnvironment<Value>: RequestProperty, RequestContainerBuilder {
+    public typealias PresentedValue = Value
+    
+    let keyPath: KeyPath<ApplicationValues, Value>
+    public var wrappedValue: Self { self }
+    
+    public init(_ keyPath: KeyPath<ApplicationValues, Value>) {
+        self.keyPath = keyPath
+    }
+    
+    public func presentValue(from container: RequestContainer) -> PresentedValue {
+        guard let appValues = container.getValue(forKey: ApplicationValuesKey.self) else {
+            fatalError("_Route parameter is requested before the execution of a request")
+        }
+        
+        return appValues[keyPath: keyPath]
+    }
+    
+    func setProperties(in request: RequestContainer) throws {}
+}
+    
 @propertyWrapper public struct RouteParameter<Key: PathKey>: RequestProperty, RequestContainerBuilder {
     public typealias PresentedValue = Key.Value
     
@@ -287,19 +326,25 @@ public extension Responder {
 
 public extension Responder where Route.BaseResponder == Self {
     func respond(
-        to httpRequest: HTTPRequest
+        to httpRequest: Vapor.Request
     ) throws -> Response<Route.OutputBody> {
+        let requestComponents = httpRequest.url.path.split(separator: "/").map(String.init)
         let request = try Request<Route.Method>(
             routerComponents: route.components,
-            requestComponents: httpRequest.path,
+            requestComponents: requestComponents,
             body: Route.Method.makeBody(from: httpRequest.body)
         )
         
-        let encoder = PreEncoder()
         let container = RequestContainer(
+            application: httpRequest.application,
             routerComponents: route.components,
-            requestComponents: httpRequest.path
+            requestComponents: requestComponents
         )
+        
+        let appValues = ApplicationValues(app: httpRequest.application)
+        container.setValue(appValues, forKey: ApplicationValuesKey.self)
+        
+        let encoder = PreEncoder()
         encoder.userInfo[.request] = container
         try self.encode(to: encoder)
         for containerBuilder in encoder.preEncodables {
