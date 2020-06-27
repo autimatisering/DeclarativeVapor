@@ -272,62 +272,40 @@ fileprivate struct ApplicationValuesKey: RequestContainerKey {
     }
 }
 
-public struct ResponderRoute<
-    Method: HTTPMethod,
-    BaseResponder: DeclarativeAPI.Responder,
-    OutputBody: Encodable
->: RouteProtocol {
-    typealias Handler = (RouteRequest<BaseResponder>) throws -> Response<OutputBody>
-    
+public struct ResponderRoute<Method: HTTPMethod>: RouteProtocol {
     public let components: [PathComponent]
-    let handler: Handler
-    
-    private init(
-        _ components: PathComponentRepresentable...,
-        handler: @escaping Handler
-    ) {
-        self.components = components.map(\.pathComponent)
-        self.handler = handler
-    }
     
     public init(
-        _ components: PathComponentRepresentable...,
-        handler: @escaping (RouteRequest<BaseResponder>) throws -> OutputBody
+        _ components: PathComponentRepresentable...
     ) {
         self.components = components.map(\.pathComponent)
-        self.handler = { request in
-            return try .ok(handler(request))
-        }
-    }
-    
-    public func respond(to request: RouteRequest<BaseResponder>) throws -> Response<OutputBody> {
-        try handler(request)
     }
 }
 
 public protocol RouteProtocol {
     associatedtype Method: HTTPMethod
-    associatedtype BaseResponder: DeclarativeAPI.Responder
-    associatedtype OutputBody: Encodable
     
     var components: [PathComponent] { get }
-    func respond(to request: RouteRequest<BaseResponder>) throws -> Response<OutputBody>
 }
+
+public protocol RouteResponse: ResponseEncodable {}
 
 public protocol Responder: Encodable {
     associatedtype Route: DeclarativeAPI.RouteProtocol
+    associatedtype Response: RouteResponse
     
     var route: Route { get }
+    func respond(to request: RouteRequest<Self>) throws -> Response
 }
 
 public extension Responder {
-    typealias GET<Output: Encodable> = DeclarativeAPI.ResponderRoute<HTTPMethods.GET, Self, Output>
+    typealias GET = DeclarativeAPI.ResponderRoute<HTTPMethods.GET>
 }
 
-public extension Responder where Route.BaseResponder == Self {
+public extension Responder {
     func respond(
         to httpRequest: Vapor.Request
-    ) throws -> Response<Route.OutputBody> {
+    ) throws -> EventLoopFuture<Vapor.Response> {
         let requestComponents = httpRequest.url.path.split(separator: "/").map(String.init)
         let request = try Request<Route.Method>(
             routerComponents: route.components,
@@ -357,7 +335,23 @@ public extension Responder where Route.BaseResponder == Self {
             container: container
         )
         
-        return try route.respond(to: routeRequest)
+        return try respond(to: routeRequest).encodeResponse(for: httpRequest)
+    }
+}
+
+public struct DelayedResponse<Response: RouteResponse>: RouteResponse {
+    private let response: Response
+    private let done: EventLoopFuture<Void>
+    
+    public init<R>(_ response: Response, untilSuccess: EventLoopFuture<R>) {
+        self.response = response
+        self.done = untilSuccess.transform(to: ())
+    }
+    
+    public func encodeResponse(for request: Vapor.Request) -> EventLoopFuture<Vapor.Response> {
+        return done.flatMap {
+            response.encodeResponse(for: request)
+        }
     }
 }
 

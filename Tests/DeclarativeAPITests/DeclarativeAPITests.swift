@@ -4,7 +4,7 @@ import MongoKitten
 import Meow
 import DeclarativeAPI
 
-struct User: Model {
+struct User: MeowModel {
     var _id: String
     let name: String
 }
@@ -17,11 +17,13 @@ struct GetUser: DeclarativeAPI.Responder {
     @RouteParameter<UserKey> var userId
     @AppEnvironment(\.meow) var db
     
-    var route: GET<User> {
-        GET<User>("users", $userId) { request in
-            return User(_id: request.userId, name: "Hoi")
-                .saved(in: request.db)
-        }
+    var route: some RouteProtocol {
+        GET("users", $userId)
+    }
+    
+    func respond(to request: RouteRequest<GetUser>) throws -> some RouteResponse {
+        return User(_id: request.userId, name: "Hoi")
+            .saving(to: request.db)
     }
 }
 
@@ -31,9 +33,8 @@ final class DeclarativeAPITests: XCTestCase {
     func testExample() throws {
         let request = Vapor.Request(application: app, method: .GET, url: "/users/1", on: app.eventLoopGroup.next())
         
-        let response = try GetUser().respond(to: request)
-        XCTAssertEqual(response.body._id, "1")
-        XCTAssertEqual(response.body.name, "Hoi")
+        let response = try GetUser().respond(to: request).wait()
+        print(response)
     }
 
     static var allTests = [
@@ -61,10 +62,10 @@ extension ApplicationValues {
     }
 }
 
-extension Model {
-    public func saved(in db: MeowDatabase) -> Self {
-        print(db)
-        return self
-//        DelayedResponse(self, untilSuccess: save(in: db))
+public protocol MeowModel: Meow.Model, RouteResponse, Content {}
+
+extension MeowModel {
+    public func saving(to db: MeowDatabase) -> some RouteResponse {
+        DelayedResponse(self, untilSuccess: save(in: db))
     }
 }
