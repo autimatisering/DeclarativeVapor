@@ -38,6 +38,15 @@
         }
       },
       {
+        "package": "jwt-kit",
+        "repositoryURL": "https://github.com/vapor/jwt-kit.git",
+        "state": {
+          "branch": null,
+          "revision": "b5b711fd6ee5638552a29a0c39003aeb109caa94",
+          "version": "4.0.0-rc.1.5"
+        }
+      },
+      {
         "package": "MongoKitten",
         "repositoryURL": "https://github.com/OpenKitten/MongoKitten.git",
         "state": {

@@ -1,4 +1,4 @@
-import Vapor
+@_exported import Vapor
 import Foundation
 
 public typealias HTTPBody = Vapor.Request.Body
@@ -6,7 +6,7 @@ public typealias HTTPBody = Vapor.Request.Body
 public protocol HTTPMethod {
     associatedtype InputBody
     
-    static var methodName: String { get }
+    static var method: Vapor.HTTPMethod { get }
     static func makeBody(from body: HTTPBody) throws -> InputBody
 }
 
@@ -14,13 +14,13 @@ public enum HTTPMethods {
     public struct GET: HTTPMethod {
         public typealias InputBody = Void
         
-        public static let methodName = "GET"
+        public static let method = Vapor.HTTPMethod.GET
         
         public static func makeBody(from body: HTTPBody) throws -> Void {}
     }
 
     public struct POST<InputBody: Decodable>: HTTPMethod {
-        public static var methodName: String { "POST" }
+        public static var method: Vapor.HTTPMethod { .POST }
         
         public static func makeBody(from body: HTTPBody) throws -> InputBody {
             guard let buffer = body.data else {
@@ -42,7 +42,7 @@ protocol Middleware {
 public struct PathComponent: PathComponentRepresentable {
     fileprivate enum _Component {
         case exact(String)
-        case value(ObjectIdentifier)
+        case value(name: String, id: ObjectIdentifier)
     }
     
     fileprivate let wrapped: _Component
@@ -100,6 +100,7 @@ enum CustomRouterError: Error {
     case unexpectedBodyProvided
     case missingBody
     case missingPathComponent(Any.Type)
+    case missingRequest
 }
 
 public struct Request<Method: HTTPMethod> {
@@ -189,10 +190,38 @@ public protocol RequestContainerKey {
     associatedtype Value
 }
 public protocol PathKey: RequestContainerKey where Value: LosslessStringConvertible {}
+public protocol RequestValue: RequestContainerKey {
+    static func makeValue(from request: Vapor.Request) throws -> Value
+}
 
-//public protocol ApplicationKey: RequestContainerKey {
-//    func instantiate(on application: Application)
-//}
+fileprivate struct RequestKey: RequestContainerKey {
+    typealias Value = Vapor.Request
+}
+
+@propertyWrapper public struct RequestEnvironment<Key: RequestValue>: RequestProperty, RequestContainerBuilder {
+    public typealias PresentedValue = Key.Value
+    
+    public var wrappedValue: Self { self }
+    
+    public init(_ type: Key.Type) { }
+    
+    public func presentValue(from container: RequestContainer) -> PresentedValue {
+        guard let value = container.getValue(forKey: Key.self) else {
+            fatalError("_Route parameter is requested before the execution of a request")
+        }
+        
+        return value
+    }
+    
+    func setProperties(in container: RequestContainer) throws {
+        guard let request = container.getValue(forKey: RequestKey.self) else {
+            throw CustomRouterError.missingRequest
+        }
+        
+        let value = try Key.makeValue(from: request)
+        container.setValue(value, forKey: Key.self)
+    }
+}
 
 public struct ApplicationValues {
     public let app: Application
@@ -233,7 +262,7 @@ fileprivate struct ApplicationValuesKey: RequestContainerKey {
     public var wrappedValue: Self { self }
     
     public var projectedValue: PathComponent {
-        .init(component: .value(ObjectIdentifier(Key.self)))
+        .init(component: .value(name: "\(Self.self)", id: ObjectIdentifier(Key.self)))
     }
     
     public init(_ key: Key.Type = Key.self) {}
@@ -253,7 +282,7 @@ fileprivate struct ApplicationValuesKey: RequestContainerKey {
         
         nextComponent: for i in 0..<request.routerComponents.count {
             let component = request.routerComponents[i]
-            guard case let .value(typeId) = component.wrapped, typeId == keyId else {
+            guard case let .value(_, typeId) = component.wrapped, typeId == keyId else {
                 continue nextComponent
             }
             
@@ -290,52 +319,82 @@ public protocol RouteProtocol {
 
 public protocol RouteResponse: ResponseEncodable {}
 
-public protocol Responder: Encodable {
+public protocol DeclarativeResponder: Encodable {
     associatedtype Route: DeclarativeAPI.RouteProtocol
     associatedtype Response: RouteResponse
+    associatedtype Input: Decodable
     
     var route: Route { get }
     func respond(to request: RouteRequest<Self>) throws -> Response
 }
 
-public extension Responder {
-    typealias GET = DeclarativeAPI.ResponderRoute<HTTPMethods.GET>
+extension Never: Decodable {
+    public init(from decoder: Decoder) throws {
+        fatalError()
+    }
 }
 
-public extension Responder {
+public protocol GetResponder: DeclarativeAPI.DeclarativeResponder where Route == ResponderRoute<HTTPMethods.GET>, Input == Never {
+    typealias GetRoute = ResponderRoute<HTTPMethods.GET>
+    func makeRoute() -> GetRoute
+}
+
+extension GetResponder {
+    public var route: Route {
+        makeRoute()
+    }
+}
+
+public protocol PostResponder: DeclarativeAPI.DeclarativeResponder where Route == ResponderRoute<HTTPMethods.POST<Input>> {
+    typealias PostRoute = ResponderRoute<HTTPMethods.POST<Input>>
+    func makeRoute() -> PostRoute
+}
+
+extension PostResponder {
+    public var route: Route {
+        makeRoute()
+    }
+}
+
+public extension DeclarativeResponder {
     func respond(
         to httpRequest: Vapor.Request
-    ) throws -> EventLoopFuture<Vapor.Response> {
-        let requestComponents = httpRequest.url.path.split(separator: "/").map(String.init)
-        let request = try Request<Route.Method>(
-            routerComponents: route.components,
-            requestComponents: requestComponents,
-            body: Route.Method.makeBody(from: httpRequest.body)
-        )
-        
-        let container = RequestContainer(
-            application: httpRequest.application,
-            routerComponents: route.components,
-            requestComponents: requestComponents
-        )
-        
-        let appValues = ApplicationValues(app: httpRequest.application)
-        container.setValue(appValues, forKey: ApplicationValuesKey.self)
-        
-        let encoder = PreEncoder()
-        encoder.userInfo[.request] = container
-        try self.encode(to: encoder)
-        for containerBuilder in encoder.preEncodables {
-            try containerBuilder.setProperties(in: container)
+    ) -> EventLoopFuture<Vapor.Response> {
+        do {
+            let requestComponents = httpRequest.url.path.split(separator: "/").map(String.init)
+            let request = try Request<Route.Method>(
+                routerComponents: route.components,
+                requestComponents: requestComponents,
+                body: Route.Method.makeBody(from: httpRequest.body)
+            )
+            
+            let container = RequestContainer(
+                application: httpRequest.application,
+                routerComponents: route.components,
+                requestComponents: requestComponents
+            )
+            
+            let appValues = ApplicationValues(app: httpRequest.application)
+            container.setValue(appValues, forKey: ApplicationValuesKey.self)
+            container.setValue(httpRequest, forKey: RequestKey.self)
+            
+            let encoder = PreEncoder()
+            encoder.userInfo[.request] = container
+            try self.encode(to: encoder)
+            for containerBuilder in encoder.preEncodables {
+                try containerBuilder.setProperties(in: container)
+            }
+            
+            let routeRequest = RouteRequest<Self>(
+                responder: self,
+                request: request,
+                container: container
+            )
+            
+            return try respond(to: routeRequest).encodeResponse(for: httpRequest)
+        } catch {
+            return httpRequest.eventLoop.future(error: error)
         }
-        
-        let routeRequest = RouteRequest<Self>(
-            responder: self,
-            request: request,
-            container: container
-        )
-        
-        return try respond(to: routeRequest).encodeResponse(for: httpRequest)
     }
 }
 
@@ -351,14 +410,18 @@ public struct DelayedResponse<Response: RouteResponse>: RouteResponse {
     public func encodeResponse(for request: Vapor.Request) -> EventLoopFuture<Vapor.Response> {
         return done.flatMap {
             response.encodeResponse(for: request)
-        }
+        }.hop(to: request.eventLoop)
     }
 }
 
-@dynamicMemberLookup public struct RouteRequest<R: Responder> {
+@dynamicMemberLookup public struct RouteRequest<R: DeclarativeResponder> {
     let responder: R
     let request: Request<R.Route.Method>
     let container: RequestContainer
+    
+    public var body: R.Route.Method.InputBody {
+        request.body
+    }
     
     public subscript<V: RequestProperty>(dynamicMember keyPath: KeyPath<R, V>) -> V.PresentedValue {
         responder[keyPath: keyPath].presentValue(from: container)
@@ -468,3 +531,36 @@ fileprivate struct BasicPreEncodingContainer: UnkeyedEncodingContainer, SingleVa
         encoder
     }
 }
+
+extension Application {
+    public func register<Responder: DeclarativeAPI.DeclarativeResponder>(
+        _ responder: Responder
+    ) {
+        let route = Vapor.Route(
+            method: Responder.Route.Method.method,
+            path: responder.route.components.map { component in
+                switch component.wrapped {
+                case .value(let name, _):
+                    return Vapor.PathComponent.parameter(name)
+                case .exact(let value):
+                    return Vapor.PathComponent.constant(value)
+                }
+            },
+            responder: BasicResponder(closure: responder.respond),
+            requestType: Vapor.Request.self,
+            responseType: Vapor.Response.self
+        )
+        
+        self.add(route)
+    }
+}
+
+public struct FailableRequestValue<SubValue: RequestValue>: RequestValue {
+    public typealias Value = SubValue.Value?
+    
+    public static func makeValue(from request: Vapor.Request) throws -> SubValue.Value? {
+        try? SubValue.makeValue(from: request)
+    }
+}
+
+public typealias FailableRequestEnvironment<T: RequestValue> = RequestEnvironment<FailableRequestValue<T>>

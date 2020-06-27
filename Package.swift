@@ -13,10 +13,12 @@ let package = Package(
         .library(
             name: "DeclarativeAPI",
             targets: ["DeclarativeAPI"]),
+        .executable(name: "Example", targets: ["Example"])
     ],
     dependencies: [
         // Dependencies declare other packages that this package depends on.
         .package(url: "https://github.com/vapor/vapor.git", from: "4.0.0"),
+        .package(url: "https://github.com/vapor/jwt-kit.git", from: "4.0.0-rc.1"),
         .package(url: "https://github.com/OpenKitten/MongoKitten.git", from: "6.0.0"),
     ],
     targets: [
@@ -25,6 +27,9 @@ let package = Package(
         .target(
             name: "DeclarativeAPI",
             dependencies: ["Vapor"]),
+        .target(
+            name: "Example",
+            dependencies: ["DeclarativeAPI", "JWTKit", "Vapor", "MongoKitten", "Meow"]),
         .testTarget(
             name: "DeclarativeAPITests",
             dependencies: ["DeclarativeAPI", "Vapor", "MongoKitten", "Meow"]),
