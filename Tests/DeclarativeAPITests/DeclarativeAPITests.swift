@@ -12,32 +12,36 @@ struct User: Model {
     let name: String
 }
 
-struct UserId: PathKey {
+struct UserKey: PathKey {
     typealias Value = User.Identifier
 }
 
-
-
-//struct GetUser: Responder {
-//    
-//}
+struct GetUser: Responder {
+    @RouteParameter<UserKey> var userId
+    
+    var route: some Route {
+        GET<User>("users", $userId) { request in
+            print(request)
+            
+            return .ok(User(id: request.userId, name: "Hoi"))
+        }
+    }
+}
 
 final class DeclarativeAPITests: XCTestCase {
     func testExample() throws {
-        let route = GET<User>("users", UserId()) { request in
-            let id = try request.parameter(UserId.self)
-            
-            return .ok(User(id: id, name: "Joannis"))
-        }
+//        let route = GET<User>("users", UserId()) { request in
+//            let id = try request.parameter(UserId.self)
+//            
+//            return .ok(User(id: id, name: "Joannis"))
+//        }
         
         print(
-            try route.execute(
-                HTTPRequest(
-                    method: "GET",
-                    components: ["users", "1"],
-                    body: []
-                )
-            )
+            try GetUser().respond(to: HTTPRequest(
+                method: "GET",
+                path: ["users", "1"],
+                body: []
+            ))
         )
     }
 
