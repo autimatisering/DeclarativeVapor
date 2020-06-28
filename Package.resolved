@@ -65,6 +65,15 @@
         }
       },
       {
+        "package": "IkigaJSON",
+        "repositoryURL": "https://github.com/Autimatisering/IkigaJSON.git",
+        "state": {
+          "branch": null,
+          "revision": "107f2addba0fdbb2c5aa90bce4b1cc7a1e1fbd80",
+          "version": "2.0.3"
+        }
+      },
+      {
         "package": "jwt-kit",
         "repositoryURL": "https://github.com/vapor/jwt-kit.git",
         "state": {

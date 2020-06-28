@@ -64,36 +64,6 @@ extension String: PathComponentRepresentable {
     }
 }
 
-public protocol SimpleRouteProtocol {
-    associatedtype Method: HTTPMethod
-    associatedtype OutputBody: Encodable
-    
-    var components: [PathComponent] { get }
-    func respond(to request: Request<Method>) throws -> Response<OutputBody>
-}
-
-public struct Route<
-    Method: HTTPMethod,
-    OutputBody: Encodable
->: DeclarativeAPI.SimpleRouteProtocol {
-    public typealias Handler = (Request<Method>) throws -> Response<OutputBody>
-    
-    public let components: [PathComponent]
-    private let handler: Handler
-    
-    public init(
-        _ components: PathComponentRepresentable...,
-        handler: @escaping Handler
-    ) {
-        self.components = components.map(\.pathComponent)
-        self.handler = handler
-    }
-    
-    public func respond(to request: Request<Method>) throws -> Response<OutputBody> {
-        try handler(request)
-    }
-}
-
 enum CustomRouterError: Error {
     case pathComponentDecodeFailure(input: String, output: Any.Type)
     case invalidHttpMethod(provided: String, needed: String)
@@ -101,45 +71,6 @@ enum CustomRouterError: Error {
     case missingBody
     case missingPathComponent(Any.Type)
     case missingRequest
-}
-
-public struct Request<Method: HTTPMethod> {
-    let routerComponents: [PathComponent]
-    let requestComponents: [String]
-    public let body: Method.InputBody
-    
-    public func parameter<Key: PathKey>(_ type: Key.Type) throws -> Key.Value {
-        let component = ""
-        guard let value = Key.Value(component) else {
-            throw CustomRouterError.pathComponentDecodeFailure(
-                input: "",
-                output: Key.Value.self
-            )
-        }
-        
-        return value
-    }
-}
-
-public struct Response<OutputBody: Encodable> {
-    let code: Int
-    public let body: OutputBody
-    
-    public static func ok(_ body: OutputBody) -> Self {
-        Self(code: 200, body: body)
-    }
-}
-
-public struct HTTPRequest {
-    public let method: String
-    public let path: [String]
-    public let body: HTTPBody
-    
-    public init(method: String, path: [String], body: HTTPBody) {
-        self.method = method
-        self.path = path
-        self.body = body
-    }
 }
 
 protocol RequestContainerBuilder: Encodable {
@@ -317,8 +248,28 @@ public protocol RouteProtocol {
     var components: [PathComponent] { get }
 }
 
-public protocol RouteResponse: ResponseEncodable {}
-public typealias RouteContent = Content & RouteResponse
+public protocol AsynchronousEncodable {
+    associatedtype E: Encodable
+    
+    func encode(for request: Request) -> EventLoopFuture<E>
+}
+
+public protocol RouteResponse: AsynchronousEncodable {}
+
+public protocol RouteContent: Content, RouteResponse where E == Self {}
+extension RouteContent {
+    public func encode(for request: Request) -> EventLoopFuture<E> {
+        request.eventLoop.future(self)
+    }
+    
+    public func encodeResponse(for request: Request) -> EventLoopFuture<Response> {
+        encode(for: request).flatMapThrowing { (encodable: E) in
+            let response = Response()
+            try response.content.encode(encodable, as: .json)
+            return response
+        }
+    }
+}
 
 public protocol DeclarativeResponder: Encodable {
     associatedtype Route: DeclarativeAPI.RouteProtocol
@@ -363,11 +314,6 @@ public extension DeclarativeResponder {
     ) -> EventLoopFuture<Vapor.Response> {
         do {
             let requestComponents = httpRequest.url.path.split(separator: "/").map(String.init)
-            let request = try Request<Route.Method>(
-                routerComponents: route.components,
-                requestComponents: requestComponents,
-                body: Route.Method.makeBody(from: httpRequest.body)
-            )
             
             let container = RequestContainer(
                 application: httpRequest.application,
@@ -388,46 +334,116 @@ public extension DeclarativeResponder {
             
             let routeRequest = RouteRequest<Self>(
                 responder: self,
-                request: request,
+                body: try Route.Method.makeBody(from: httpRequest.body),
+                vapor: httpRequest,
                 container: container
             )
             
-            return try respond(to: routeRequest).encodeResponse(for: httpRequest)
+            return try respond(to: routeRequest)
+                .encode(for: httpRequest)
+                .flatMapThrowing { encodable in
+                    let response = Vapor.Response()
+                    try response.content.encode(encodable, as: .json)
+                    return response
+                }
         } catch {
             return httpRequest.eventLoop.future(error: error)
         }
     }
 }
 
-public struct DelayedResponse<Response: RouteResponse>: RouteResponse {
-    private let response: Response
-    private let done: EventLoopFuture<Void>
+public protocol _AsynchronousResult {
+    associatedtype Result
     
-    public init<R>(_ response: Response, untilSuccess: EventLoopFuture<R>) {
+    var result: EventLoopFuture<Result> { get }
+}
+
+public struct DelayedResult<Result>: _AsynchronousResult {
+    private let response: Result
+    private let done: EventLoopFuture<Void>
+    public var result: EventLoopFuture<Result> {
+        done.transform(to: response)
+    }
+    
+    public init<R>(_ response: Result, untilSuccess: EventLoopFuture<R>) {
         self.response = response
         self.done = untilSuccess.transform(to: ())
     }
+}
+
+extension DelayedResult: AsynchronousEncodable where Result: AsynchronousEncodable {
+    public func encode(for request: Request) -> EventLoopFuture<Result.E> {
+        result.flatMap {
+            $0.encode(for: request)
+        }
+    }
+}
+
+extension DelayedResult: ResponseEncodable, RouteResponse where Result: RouteResponse {
+    public func encode(for request: Request) -> EventLoopFuture<Result.E> {
+        result.flatMap {
+            $0.encode(for: request)
+        }
+    }
     
-    public func encodeResponse(for request: Vapor.Request) -> EventLoopFuture<Vapor.Response> {
-        return done.flatMap {
-            response.encodeResponse(for: request)
-        }.hop(to: request.eventLoop)
+    public func encodeResponse(for request: Request) -> EventLoopFuture<Response> {
+        encode(for: request).flatMapThrowing { (encodable: E) in
+            let response = Response()
+            try response.content.encode(encodable, as: .json)
+            return response
+        }
     }
 }
 
 @dynamicMemberLookup public struct RouteRequest<R: DeclarativeResponder> {
     let responder: R
-    let request: Request<R.Route.Method>
+    public let body: R.Route.Method.InputBody
+    let vapor: Request
     let container: RequestContainer
-    
-    public var body: R.Route.Method.InputBody {
-        request.body
-    }
     
     public subscript<V: RequestProperty>(dynamicMember keyPath: KeyPath<R, V>) -> V.PresentedValue {
         responder[keyPath: keyPath].presentValue(from: container)
     }
 }
+
+extension RouteResponse {
+    public func flatten(on request: Request) -> Asynchronous<E> {
+        Asynchronous(encode(for: request))
+    }
+    
+    public func flatten<T>(on request: RouteRequest<T>) -> Asynchronous<E> {
+        flatten(on: request.vapor)
+    }
+}
+
+@dynamicMemberLookup public struct Asynchronous<Result>: _AsynchronousResult {
+    public let result: EventLoopFuture<Result>
+    
+    public init(_ result: EventLoopFuture<Result>) {
+        self.result = result
+    }
+    
+    public subscript<T>(dynamicMember keyPath: KeyPath<Result, T>) -> Asynchronous<T> {
+        Asynchronous<T>(result.map { $0[keyPath: keyPath] })
+    }
+}
+
+extension Asynchronous: ResponseEncodable, RouteResponse, AsynchronousEncodable where Result: RouteResponse {
+    public func encode(for request: Request) -> EventLoopFuture<Result.E> {
+        result.flatMap {
+            $0.encode(for: request)
+        }
+    }
+    
+    public func encodeResponse(for request: Request) -> EventLoopFuture<Response> {
+        encode(for: request).flatMapThrowing { (encodable: E) in
+            let response = Response()
+            try response.content.encode(encodable, as: .json)
+            return response
+        }
+    }
+}
+
 
 fileprivate final class PreEncoder: Encoder {
     var codingPath: [CodingKey] { [] }
