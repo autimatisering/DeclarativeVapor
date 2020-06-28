@@ -1,5 +1,4 @@
 import NIO
-import DeclarativeAPI
 import Vapor
 import Fluent
 import JWTKit
@@ -33,6 +32,13 @@ public struct UserToken<User: UserModel>: RouteContent {
         self.wrapped = wrapped
     }
     
+    public func resolveUser(in database: Fluent.Database) -> Asynchronous<User> {
+        let user = User.find(wrapped.user, on: database)
+            .unwrap(or: Abort(.notFound))
+        
+        return Asynchronous(user)
+    }
+    
     public func encode(to encoder: Encoder) throws {
         let token = try User.jwtSigner.sign(wrapped)
         try token.encode(to: encoder)
@@ -63,11 +69,32 @@ public struct TokenValue<User: UserModel>: RequestValue {
     }
 }
 
+public struct ResolvedTokenValue<User: UserModel>: AsynchronousRequestValue {
+    public typealias Value = User
+    
+    public static func makeValue(from request: Request) -> EventLoopFuture<User> {
+        do {
+            let token = try TokenValue<User>.makeValue(from: request)
+            return token.resolveUser(in: request.db).result
+        } catch {
+            return request.eventLoop.future(error: error)
+        }
+    }
+}
+
 public typealias RequestToken<User: UserModel> = RequestEnvironment<TokenValue<User>>
+
+public typealias Authenticated<User: UserModel> = AsynchronousRequestEnvironment<ResolvedTokenValue<User>>
 
 extension RequestEnvironment {
     public init<User: UserModel>(_ type: User.Type) where Key == TokenValue<User> {
         self.init(TokenValue<User>.self)
+    }
+}
+
+extension AsynchronousRequestEnvironment {
+    public init<User: UserModel>(as type: User.Type) where Key == ResolvedTokenValue<User> {
+        self.init(ResolvedTokenValue<User>.self)
     }
 }
 

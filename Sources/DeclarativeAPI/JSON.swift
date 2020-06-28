@@ -1,5 +1,3 @@
-import DeclarativeAPI
-
 @_functionBuilder
 public struct JSONObjectBuilder {
     public static func buildBlock() -> EventualJSONObject {

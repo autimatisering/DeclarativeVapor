@@ -1,5 +1,3 @@
-import DeclarativeAPI
-
 public struct AsyncPasswordHasherKey: RequestValue {
     public typealias Value = AsyncPasswordHasher
     
@@ -14,7 +12,7 @@ public struct HashPassword<R: AsynchronousEncodable>: RouteResponse {
     private let password: String
     private let onHash: (PasswordHash) throws -> R
     
-    init(_ password: String, onHash: @escaping (PasswordHash) -> R) {
+    public init(_ password: String, onHash: @escaping (PasswordHash) -> R) {
         self.password = password
         self.onHash = onHash
     }

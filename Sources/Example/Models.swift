@@ -4,6 +4,18 @@ import DeclarativeAPI
 import JWTKit
 import Fluent
 
+enum AccountType: String, Codable, Comparable {
+    static func < (lhs: AccountType, rhs: AccountType) -> Bool {
+        if lhs == .user && rhs == .admin {
+            return true
+        } else {
+            return false
+        }
+    }
+    
+    case admin, user
+}
+
 final class User: UserModel {
     typealias E = User
     func encode(for request: Request) -> EventLoopFuture<User> {
@@ -33,6 +45,7 @@ public final class UserProfile: Fields, RouteContent {
     public typealias E = UserProfile
     
     @Field(key: "name") var name: String
+    @Field(key: "type") var type: AccountType
     
     init(named name: String) {
         self.name = name

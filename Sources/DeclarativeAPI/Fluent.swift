@@ -1,4 +1,3 @@
-import DeclarativeAPI
 import FluentKit
 import Fluent
 import Vapor
@@ -9,30 +8,30 @@ extension Model {
     }
 }
 
-struct AllResults<M: Model>: RouteResponse {
-    typealias E = [M]
+public struct AllResults<M: Model>: RouteResponse {
+    public typealias E = [M]
     private let database: Database
     private var failable = false
 
-    init(of type: M.Type, in database: Database) {
+    public init(of type: M.Type, in database: Database) {
         self.database = database
     }
     
-    func encode(for request: Request) -> EventLoopFuture<[M]> {
+    public func encode(for request: Request) -> EventLoopFuture<[M]> {
         database.query(M.self).all()
     }
 
-    func failable(failable: Bool = true) -> Self {
+    public func failable(failable: Bool = true) -> Self {
         var copy = self
         copy.failable = true
         return copy
     }
 }
 
-struct FluentDatabase: RequestValue {
-    typealias Value = Fluent.Database
+public struct FluentDatabase: RequestValue {
+    public typealias Value = Fluent.Database
     
-    static func makeValue(from request: Vapor.Request) throws -> Database {
+    public static func makeValue(from request: Vapor.Request) throws -> Database {
         request.db
     }
 }

@@ -23,14 +23,22 @@ struct CreateUser: PostResponder {
         }.flatten(on: request)
         
         return JSONObject {
-            JSONKey("token") {
-                user.token()
-            }
-            
-            JSONKey("profile") {
-                user.profile
-            }
+            JSONKey("token", value: user.token())
+            JSONKey("profile", value: user.profile)
         }
+    }
+}
+
+struct GetProfile: GetResponder {
+    @RequestEnvironment(FluentDatabase.self) var db
+    @Authenticated(as: User.self) var user
+    
+    func makeRoute() -> GetRoute {
+        GetRoute("users", "me")
+    }
+    
+    func respond(to request: RouteRequest<GetProfile>) throws -> some RouteResponse {
+        request.user.profile
     }
 }
 
@@ -45,5 +53,20 @@ struct ListAll<M: Model>: GetResponder {
     func respond(to request: RouteRequest<Self>) throws -> some RouteResponse {
         AllResults(of: M.self, in: request.db)
             .failable()
+    }
+}
+
+struct PermissionsCheck: InboundMiddleware {
+    let type: AccountType
+    @Authenticated(as: User.self) var user
+    
+    init(type: AccountType) {
+        self.type = type
+    }
+    
+    func handleRequest(_ request: MiddlewareRequest<Self>) throws {
+        guard request.user.profile.type > type else {
+            throw Abort(.unauthorized)
+        }
     }
 }
