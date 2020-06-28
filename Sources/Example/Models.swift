@@ -49,6 +49,7 @@ public final class UserProfile: Fields, RouteContent {
     
     init(named name: String) {
         self.name = name
+        self.type = .user
     }
     
     public init() { }

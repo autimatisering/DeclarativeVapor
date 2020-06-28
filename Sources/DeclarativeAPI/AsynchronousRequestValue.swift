@@ -13,14 +13,14 @@ public protocol AsynchronousRequestValue: RequestContainerKey {
     
     public func presentValue(from container: RequestContainer) -> PresentedValue {
         guard let value = container.getValue(forKey: Key.self) else {
-            fatalError("_Route parameter is requested before the execution of a request")
+            fatalError("Route parameter is requested before the execution of a request")
         }
         
         return value
     }
     
     func asynchronouslySetProperties(in container: RequestContainer) -> EventLoopFuture<Void> {
-        if container.containsValue(forKey: RequestKey.self) {
+        if container.containsValue(forKey: Key.self) {
             return container.eventLoop.makeSucceededFuture(())
         }
         

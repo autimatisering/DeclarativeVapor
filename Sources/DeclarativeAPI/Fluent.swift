@@ -3,8 +3,8 @@ import Fluent
 import Vapor
 
 extension Model {
-    public func saving(to db: Database) -> DelayedResult<Self> {
-        DelayedResult(self, untilSuccess: save(on: db))
+    public func saving(to db: Database) -> Asynchronous<Self> {
+        Asynchronous(save(on: db).transform(to: self))
     }
 }
 

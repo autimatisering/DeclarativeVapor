@@ -126,7 +126,7 @@ extension RouteResponse {
     }
 }
 
-extension Asynchronous: ResponseEncodable, RouteResponse, AsynchronousEncodable where Result: RouteResponse {
+extension Asynchronous: ResponseEncodable, RouteResponse, AsynchronousEncodable where Result: AsynchronousEncodable {
     public func encode(for request: Request) -> EventLoopFuture<Result.E> {
         result.flatMap {
             $0.encode(for: request)

