@@ -82,14 +82,16 @@ public struct JSONKey: EventualJSONPair {
         makeValue(request)
     }
     
-    public init<RE: RouteResponse>(_ key: String, build: () -> RE) {
-        let value = build()
+    public init<RE: RouteResponse>(_ key: String, value: RE) {
         self.makeValue = { request in
             value.encode(for: request).flatMapThrowing { value in
                 return (key, value.encode)
             }
         }
-//        build().
+    }
+    
+    public init<RE: RouteResponse>(_ key: String, build: () -> RE) {
+        self.init(key, value: build())
     }
 }
 
