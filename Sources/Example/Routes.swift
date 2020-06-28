@@ -1,47 +1,34 @@
+import Fluent
 import BSON
 import DeclarativeAPI
 
 struct CreateUser: PostResponder {
-    @AppEnvironment(\.meow) var db
+    @RequestEnvironment(FluentDatabase.self) var db
     
     struct Input: Decodable {
         let name: String
     }
     
     func makeRoute() -> PostRoute {
-        PostRoute(User.collectionName)
+        PostRoute(User.schema)
     }
     
     func respond(to request: RouteRequest<CreateUser>) throws -> some RouteResponse {
-        return User(_id: ObjectId(), name: request.body.name)
+        return User(named: request.body.name)
             .saving(to: request.db)
     }
 }
 
-struct ListAll<M: MeowModel>: GetResponder {
-    @AppEnvironment(\.meow) var db
-    @RequestEnvironment(Token.self) var token
+struct ListAll<M: Model>: GetResponder {
+    @RequestEnvironment(FluentDatabase.self) var db
+//    @RequestEnvironment(Token.self) var token
     
     func makeRoute() -> GetRoute {
-        GetRoute(M.collectionName)
+        GetRoute(M.schema)
     }
     
     func respond(to request: RouteRequest<Self>) throws -> some RouteResponse {
-        AllResults(in: request.db[M.self])
+        AllResults(of: M.self, in: request.db)
+            .failable()
     }
 }
-
-
-//struct GetUser: GetResponder {
-//    @RouteParameter<User.Parameter> var userId
-//    @AppEnvironment(\.meow) var db
-//
-//    var route: some RouteProtocol {
-//        GET("users", $userId)
-//    }
-//
-//    func respond(to request: RouteRequest<GetUser>) throws -> some RouteResponse {
-//        return User(_id: request.userId, name: "Hoi")
-//            .saving(to: request.db)
-//    }
-//}

@@ -18,6 +18,8 @@ let package = Package(
     dependencies: [
         // Dependencies declare other packages that this package depends on.
         .package(url: "https://github.com/vapor/vapor.git", from: "4.0.0"),
+        .package(url: "https://github.com/vapor/fluent.git", from: "4.0.0"),
+        .package(url: "https://github.com/vapor/fluent-mongo-driver.git", from: "1.0.0"),
         .package(url: "https://github.com/vapor/jwt-kit.git", from: "4.0.0-rc.1"),
         .package(url: "https://github.com/OpenKitten/MongoKitten.git", from: "6.0.0"),
     ],
@@ -29,7 +31,7 @@ let package = Package(
             dependencies: ["Vapor"]),
         .target(
             name: "Example",
-            dependencies: ["DeclarativeAPI", "JWTKit", "Vapor", "MongoKitten", "Meow"]),
+            dependencies: ["DeclarativeAPI", "Fluent", "FluentMongoDriver", "JWTKit", "Vapor", "MongoKitten"]),// "Meow"]),
         .testTarget(
             name: "DeclarativeAPITests",
             dependencies: ["DeclarativeAPI", "Vapor", "MongoKitten", "Meow"]),

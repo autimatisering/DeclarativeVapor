@@ -1,12 +1,19 @@
+import BSON
 import DeclarativeAPI
 import JWTKit
-import BSON
+import Fluent
 
-struct User: MeowModel {
-    static let collectionName = "users"
+final class User: Model, RouteContent {
+    static let schema = "users"
     
-    var _id: ObjectId
-    let name: String
+    @ID(custom: .id) var id: ObjectId?
+    @Field(key: "name") var name: String
+    
+    init(named name: String) {
+        self.name = name
+    }
+    
+    init() {}
 }
 
 struct Token: JWTPayload, RequestValue {
@@ -17,9 +24,9 @@ struct Token: JWTPayload, RequestValue {
     }
     
     let exp: ExpirationClaim
-    let user: User.Identifier
+    let user: User.IDValue
     
-    init(user: User.Identifier) {
+    init(user: User.IDValue) {
         self.user = user
         self.exp = ExpirationClaim(value: Date().addingTimeInterval(3600))
     }

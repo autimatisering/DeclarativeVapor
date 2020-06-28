@@ -318,6 +318,7 @@ public protocol RouteProtocol {
 }
 
 public protocol RouteResponse: ResponseEncodable {}
+public typealias RouteContent = Content & RouteResponse
 
 public protocol DeclarativeResponder: Encodable {
     associatedtype Route: DeclarativeAPI.RouteProtocol
